@@ -9,7 +9,7 @@
 
 **Procedure to run MILO using UMA features through Gaussian**
 
-1. We generated a script called "setu-ensemble_gau_uma.py' to generate a slurm submission script compatible with the UMA run in Milo. This will be very useful for the initial equilibration.
+1. We generated a script called "setup_ensemble-gau_uma.py' to generate a slurm submission script compatible with the UMA run in Milo. This will be very useful for the initial equilibration.
 
 2. Since UMA doesn't have any charge information, it can only do Mechanical Embedding in ONIOM. Mechanical embedding is the default in Gaussian.
    [Use the keyword `ONIOM=EmbedCharge` in Gaussian to activate the effect of MM charges from the real system in the QM calculations on the model system.]
