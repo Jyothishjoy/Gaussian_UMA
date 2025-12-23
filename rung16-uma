@@ -1,0 +1,141 @@
+#!/bin/bash
+
+# Usage: ./rung16_uma.sh <NPROCS> <MEMORY_GB> <HOURS>
+if [ "$#" -ne 3 ]; then
+    echo "Usage: $0 <NPROCS> <MEMORY_GB> <HOURS>"
+    exit 1
+fi
+
+NPROCS=$1
+MEMORY=$2
+HOURS=$3
+EXT="com"
+SCRIPTS=$(ls *.$EXT 2>/dev/null)
+
+if [ -z "$SCRIPTS" ]; then
+    echo "No .$EXT files found in the directory."
+    exit 1
+fi
+
+# Directories
+UMA_DIR=/home/fslcollab286/softwares/gau_uma
+FAIRCHEM_ENV=$HOME/orca_6_1_0/orca-external-tools/fairchem/bin/activate
+
+for JOB in $SCRIPTS; do
+    JOBNAME=$(basename "$JOB" .$EXT)
+    SHFILE="$JOBNAME.sh"
+
+    if [ -e "$SHFILE" ]; then
+        echo "Skipping $JOBNAME: $SHFILE already exists."
+        continue
+    fi
+
+    cat << EOF > "$SHFILE"
+#!/bin/bash
+#SBATCH --job-name=$JOBNAME
+#SBATCH --nodes=1
+#SBATCH --cpus-per-task=$NPROCS
+#SBATCH --mem=${MEMORY}G
+#SBATCH --time=${HOURS}:00:00
+#SBATCH -C "rhel7&avx2"
+#SBATCH --gpus=1
+
+export OMP_NUM_THREADS=$NPROCS
+export OMP_STACKSIZE=4G
+export JOB_NAME=$JOBNAME
+export JOB_SOURCE_DIR=\$SLURM_SUBMIT_DIR
+
+# Gaussian scratch
+export GAUSS_SCRDIR=/tmp/\$USER/\$SLURM_JOB_ID
+mkdir -p "\$GAUSS_SCRDIR" || exit 1
+cd "\$JOB_SOURCE_DIR" || exit 1
+
+# Load Fairchem environment
+source $FAIRCHEM_ENV
+export PATH=\$PATH:$UMA_DIR
+
+# Force offline mode
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+export HF_HUB_DISABLE_SYMLINKS_WARNING=1
+
+# --- Dynamic port selection ---
+pick_port() {
+python - << 'PY'
+import random
+print(random.randint(20000, 59999))
+PY
+}
+
+UMA_LOG=uma_server.log
+UMASERVER_PID=""
+cleanup() {
+    echo "Stopping UMA server (pid=\$UMASERVER_PID) and cleaning scratch..."
+    if [ -n "\$UMASERVER_PID" ]; then
+        kill "\$UMASERVER_PID" 2>/dev/null
+        wait "\$UMASERVER_PID" 2>/dev/null
+    fi
+    rm -rf "\$GAUSS_SCRDIR"
+}
+trap cleanup EXIT
+
+MAX_TRIES=10
+TRY=0
+while true; do
+    TRY=\$((TRY+1))
+    export UMA_PORT=\$(pick_port)
+    echo "Starting UMA server on port \$UMA_PORT (try \$TRY/$MAX_TRIES)..."
+    : > "\$UMA_LOG"
+    python "$UMA_DIR/gauumastart" > "\$UMA_LOG" 2>&1 &
+    UMASERVER_PID=\$!
+
+    # Wait for readiness
+    TIMEOUT=60
+    ready=0
+    for i in \$(seq 1 \$TIMEOUT); do
+        if grep -q "Listening on port" "\$UMA_LOG"; then
+            ready=1
+            break
+        fi
+        if ! kill -0 "\$UMASERVER_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "\$ready" -eq 1 ]; then
+        echo "UMA server ready on port \$UMA_PORT"
+        break
+    fi
+
+    echo "UMA server failed on port \$UMA_PORT. Log:"
+    cat "\$UMA_LOG"
+    kill "\$UMASERVER_PID" 2>/dev/null
+    wait "\$UMASERVER_PID" 2>/dev/null
+    UMASERVER_PID=""
+    if [ "\$TRY" -ge "\$MAX_TRIES" ]; then
+        echo "Giving up after \$MAX_TRIES attempts."
+        exit 1
+    fi
+done
+
+echo "Job name: \$JOB_NAME"
+echo "Node: \$(hostname)"
+echo "Scratch dir: \$GAUSS_SCRDIR"
+echo "Work dir: \$JOB_SOURCE_DIR"
+echo "Start time: \$(date)"
+
+# Run Gaussian with UMA client
+/apps/gaussian16/B.01/AVX2/g16/g16 -scrdir="\$GAUSS_SCRDIR" < "\$JOB_NAME.com" > "\$JOB_NAME.log"
+status=\$?
+
+echo "Gaussian exit code: \$status"
+echo "End time: \$(date)"
+exit \$status
+EOF
+
+    sbatch "$SHFILE"
+done
+
+
