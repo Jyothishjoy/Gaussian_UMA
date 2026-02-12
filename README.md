@@ -9,14 +9,7 @@
 5. Attached is a sample Gaussian input file (), where `external=('gauuma')` is Gaussian's external call for UMA
 6. Usage: `rung16_uma <n procs> <mem in GB> <Hrs>`
 
-**Procedure to run MILO using UMA features through Gaussian**
 
-1. We generated a script called `setup_ensemble-gau_uma.py` to generate a slurm submission script compatible with the UMA run in Milo. This will be very useful for the initial equilibration.
-
-2. Since UMA doesn't have any charge information, it can only do Mechanical Embedding in ONIOM. Mechanical embedding is the default in Gaussian.
-   [Use the keyword `ONIOM=EmbedCharge` in Gaussian to activate the effect of MM charges from the real system in the QM calculations on the model system.]
-
-3. If mechanical embedding is okay for our purpose, we can even use UMA to run trajectories. After all, we are using solvents as a cage to trap the active species.
  
 
 
